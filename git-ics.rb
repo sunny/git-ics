@@ -19,6 +19,7 @@ def git_to_ical(dir)
       dtend       commit.committed_date
       summary     "Commit by #{commit.author}"
       description commit.message
+      uid         commit.id
       klass       "PUBLIC"
     end
   end
