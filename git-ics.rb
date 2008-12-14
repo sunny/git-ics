@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
-# $ sudo gem install icalendar grit mime-types
-# $ ruby git-ical.rb git-directory
+# Makes an ical of commits out of a git repository.
+# Author:   Sunny Ripert http://sunfox.org
+# Licence:  WTFPl http://sam.zoy.org/wtfpl/
+# Requires: $ sudo gem install icalendar grit mime-types
+# Usage:    $ ruby git-ics.rb git-directory
 
 require 'rubygems'
 require 'icalendar'
