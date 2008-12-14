@@ -9,14 +9,20 @@ require 'rubygems'
 require 'icalendar'
 require 'grit'
 
+class Time
+  def to_datetime
+    DateTime.civil(year, month, day, hour, min, sec, Rational(utc_offset, 86400))
+  end
+end
+
 def git_to_ical(dir)
   repo = Grit::Repo.new(dir)
   cal = Icalendar::Calendar.new
 
   repo.commits.each do |commit|
     cal.event do
-      dtstart     commit.committed_date
-      dtend       commit.committed_date
+      dtstart     commit.committed_date.to_datetime
+      dtend       commit.committed_date.to_datetime
       summary     "Commit by #{commit.author}"
       description commit.message
       uid         commit.id
