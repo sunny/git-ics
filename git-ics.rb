@@ -9,31 +9,42 @@ require 'rubygems'
 require 'icalendar'
 require 'grit'
 
-def git_to_ical(dir)
-  repo = Grit::Repo.new(dir)
-  repo_name = File.basename(File.expand_path(dir).gsub(/\/?\.git/, ''))
-  cal = Icalendar::Calendar.new
-
-  repo.commits.each do |commit|
-    datetime = DateTime.parse(commit.committed_date.to_s)
-    cal.event do
-      dtstamp     datetime
-      dtstart     datetime
-      dtend       datetime
-      summary     "#{repo_name}: commit by #{commit.author}"
-      description commit.message
-      uid         commit.id
-      klass       "PUBLIC"
-    end
+class GitIcs
+  def initialize(dir)
+    @dir = dir
   end
 
-  cal.to_ical
+  def name
+    File.basename(File.expand_path(@dir).gsub(/\/?\.git$/, ''))
+  end
+
+  def commits
+    Grit::Repo.new(@dir).commits
+  end
+
+  def to_ical
+    cal = Icalendar::Calendar.new
+    name = self.name
+    self.commits.each do |commit|
+      datetime = DateTime.parse(commit.committed_date.to_s)
+      cal.event do
+        dtstamp     datetime
+        dtstart     datetime
+        dtend       datetime
+        summary     "#{name}: commit by #{commit.author}"
+        description commit.message
+        uid         commit.id
+        klass       "PUBLIC"
+      end
+    end
+    cal.to_ical
+  end
 end
 
 if __FILE__ == $0
   dir = ARGV.first || ""
   begin
-    puts git_to_ical(dir)
+    puts GitIcs.new(dir).to_ical
   rescue Grit::NoSuchPathError, Grit::InvalidGitRepositoryError
     abort "#{$0}: #{File.expand_path(dir)} is an invalid git directory\n" + \
           "Usage: #{$0} directory"
