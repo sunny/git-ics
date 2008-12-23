@@ -45,9 +45,10 @@ if __FILE__ == $0
   dir = ARGV.first || ""
   begin
     puts GitIcs.new(dir).to_ical
-  rescue Grit::NoSuchPathError, Grit::InvalidGitRepositoryError
-    abort "#{$0}: #{File.expand_path(dir)} is an invalid git directory\n" + \
-          "Usage: #{$0} directory"
+  rescue Grit::NoSuchPathError
+    abort "#{$0}: No such path #{File.expand_path(dir)}"
+  rescue Grit::InvalidGitRepositoryError
+    abort "#{$0}: #{File.expand_path(dir)} is not a git repository"
   end
 end
 
