@@ -8,30 +8,44 @@
 require 'rubygems'
 require 'icalendar'
 require 'grit'
+require 'yaml'
+require 'open-uri'
 
 class GitIcs
-  def initialize(dir)
-    @dir = dir
-  end
-
-  def name
-    File.basename(File.expand_path(@dir).gsub(/\/?\.git$/, ''))
+  def initialize(paths)
+    @paths = paths
   end
 
   def commits
-    Grit::Repo.new(@dir).commits
+    commits = []
+    @paths.map do |path|
+      is_uri = path =~ /\:\/\//
+
+      begin
+        path = self.class.clone_from_uri(path) if is_uri
+        repo_name = File.basename(File.expand_path(path).gsub(/\/?\.git$/, ''))
+        grit_commits = Grit::Repo.new(path).commits
+        commits += grit_commits.map { |commit| [repo_name, commit] }
+      rescue Grit::NoSuchPathError => e
+        $stderr.puts "#{$0}: No such path #{e.message}"
+      rescue Grit::InvalidGitRepositoryError => e
+        $stderr.puts "#{$0}: #{e.message} is not a git repository"
+      ensure
+        %x(rm -rf #{path}) if is_uri
+      end
+    end
+    commits.sort_by { |ary| ary[1].committed_date }
   end
 
   def to_ical
     cal = Icalendar::Calendar.new
-    name = self.name
-    self.commits.each do |commit|
+    self.commits.each do |repo_name, commit|
       datetime = DateTime.parse(commit.committed_date.to_s)
       cal.event do
         dtstamp     datetime
         dtstart     datetime
         dtend       datetime
-        summary     "#{name}: commit by #{commit.author}"
+        summary     "#{repo_name}: commit by #{commit.author}"
         description commit.message
         uid         commit.id
         klass       "PUBLIC"
@@ -39,16 +53,37 @@ class GitIcs
     end
     cal.to_ical
   end
+
+  def self.clone_from_uri(uri)
+    dirname = uri.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
+    path = "/tmp/git-ics/#{dirname}.git"
+    %x(git clone --bare #{uri} #{path})
+    path
+  end
+
+  def self.github_uris_for_user(username)
+    yaml = YAML.load(open("http://github.com/api/v1/yaml/#{username}"))
+    yaml["user"]["repositories"].map { |rep|
+      "git://github.com/#{rep[:owner]}/#{rep[:name]}.git"
+    }
+  end
 end
 
 if __FILE__ == $0
-  dir = ARGV.first || ""
-  begin
-    puts GitIcs.new(dir).to_ical
-  rescue Grit::NoSuchPathError
-    abort "#{$0}: No such path #{File.expand_path(dir)}"
-  rescue Grit::InvalidGitRepositoryError
-    abort "#{$0}: #{File.expand_path(dir)} is not a git repository"
+
+  def usage
+    "Usage: #{$0} path [path...]\n" + \
+    "       #{$0} uri [uri...]\n" + \
+    "       #{$0} --github-user=username"
   end
+
+  abort usage if ARGV.empty?
+
+  paths = ARGV
+  if ARGV.first =~ /--github-user=(.*)/
+    paths = GitIcs.github_uris_for_user($1)
+  end
+
+  puts GitIcs.new(paths).to_ical
 end
 
