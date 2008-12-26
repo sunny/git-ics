@@ -3,7 +3,8 @@
 # Author:   Sunny Ripert http://sunfox.org
 # Licence:  WTFPl http://sam.zoy.org/wtfpl/
 # Requires: $ sudo gem install icalendar grit mime-types
-# Usage:    $ ruby git-ics.rb git-directory > calendar.ics
+# Usage:    $ ruby git-ics.rb git-directory-or-uri > calendar.ics
+#           $ ruby git-ics.rb --github-user=sunny > my-github-calendar.ics
 
 require 'rubygems'
 require 'icalendar'
