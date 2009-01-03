@@ -2,6 +2,7 @@
 # Makes an ical of commits out of a git repository.
 # Author:   Sunny Ripert http://sunfox.org
 # Licence:  WTFPl http://sam.zoy.org/wtfpl/
+# Version:  0.2
 # Requires: $ sudo gem install icalendar grit mime-types
 # Usage:    $ ruby git-ics.rb git-directory > calendar.ics
 
@@ -11,54 +12,88 @@ require 'grit'
 require 'yaml'
 require 'open-uri'
 
-class GitIcs
-  def initialize(paths)
-    @paths = paths
-  end
-
-  def commits
-    commits = []
-    @paths.map do |path|
-      is_uri = path =~ /\:\/\//
-
-      begin
-        path = self.class.clone_from_uri(path) if is_uri
-        repo_name = File.basename(File.expand_path(path).gsub(/\/?\.git$/, ''))
-        grit_commits = Grit::Repo.new(path).commits
-        commits += grit_commits.map { |commit| [repo_name, commit] }
-      rescue Grit::NoSuchPathError => e
-        $stderr.puts "#{$0}: No such path #{e.message}"
-      rescue Grit::InvalidGitRepositoryError => e
-        $stderr.puts "#{$0}: #{e.message} is not a git repository"
-      ensure
-        %x(rm -rf #{path}) if is_uri
-      end
+module GitIcs
+  TMP_PATH = "/tmp/git-ics"
+  
+  class Repo
+    attr_reader :location
+  
+    def initialize(location)
+      @location = location
     end
-    commits.sort_by { |ary| ary[1].committed_date }
-  end
-
-  def to_ical
-    cal = Icalendar::Calendar.new
-    self.commits.each do |repo_name, commit|
-      datetime = DateTime.parse(commit.committed_date.to_s)
-      cal.event do
-        dtstamp     datetime
-        dtstart     datetime
-        dtend       datetime
-        summary     "#{repo_name}: commit by #{commit.author}"
-        description commit.message
-        uid         commit.id
-        klass       "PUBLIC"
-      end
+  
+    def is_local?
+      !(@location =~ /\:\/\//)
     end
-    cal.to_ical
-  end
+  
+    def path
+      return @location if is_local?
+      @path ||= local_clone
+    end
+  
+    def name
+      @name ||= @location.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
+    end
+  
+    def grit
+      @grit ||= Grit::Repo.new(path)
+    end
+  
+    def commits
+      grit.commits
+    end
+  
+    def local_clone
+      path = File.join(TMP_PATH, "#{name}.git")
+      %x(git clone --bare #{@location} #{path})
+      # TODO raise Grit::InvalidGitRepositoryError.new(@location)
+      path
+    end
 
-  def self.clone_from_uri(uri)
-    dirname = uri.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
-    path = "/tmp/git-ics/#{dirname}.git"
-    %x(git clone --bare #{uri} #{path})
-    path
+  end
+  
+  class Cal
+    def initialize(locations)
+      @repos = locations.map { |location| Repo.new(location) }
+    end
+    
+    def cleanup
+      %x(rm -rf #{TMP_PATH})
+    end
+  
+    def commits
+      commits = []
+      @repos.map do |repo|
+        begin
+          commits += repo.commits.map { |commit| [repo.name, commit] }
+        rescue Grit::NoSuchPathError => e
+          $stderr.puts "#{$0}: No such path #{e.message}"
+        rescue Grit::InvalidGitRepositoryError => e
+          $stderr.puts "#{$0}: #{e.message} is not a git repository"
+        ensure
+          cleanup
+        end
+      end
+      cleanup
+      commits.sort_by { |ary| ary[1].committed_date }
+    end
+
+    def to_ical
+      cal = Icalendar::Calendar.new
+      self.commits.each do |repo_name, commit|
+        datetime = DateTime.parse(commit.committed_date.to_s)
+        cal.event do
+          dtstamp     datetime
+          dtstart     datetime
+          dtend       datetime
+          summary     "#{repo_name}: commit by #{commit.author}"
+          description commit.message
+          uid         commit.id
+          klass       "PUBLIC"
+        end
+      end
+      cal.to_ical
+    end
   end
 
   def self.github_uris_for_user(username)
@@ -79,11 +114,13 @@ if __FILE__ == $0
 
   abort usage if ARGV.empty?
 
-  paths = ARGV
-  if ARGV.first =~ /--github-user=(.*)/
-    paths = GitIcs.github_uris_for_user($1)
-  end
+  paths = ARGV.map do |arg|
+    if arg =~ /--github-user=(.*)/
+      GitIcs.github_uris_for_user($1)
+    else
+      arg
+    end
+  end.flatten
 
-  puts GitIcs.new(paths).to_ical
+  puts GitIcs::Cal.new(paths).to_ical
 end
-
