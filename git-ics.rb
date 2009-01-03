@@ -14,35 +14,35 @@ require 'open-uri'
 
 module GitIcs
   TMP_PATH = "/tmp/git-ics"
-  
+
   class Repo
     attr_reader :location
-  
+
     def initialize(location)
       @location = location
     end
-  
+
     def is_local?
       !(@location =~ /\:\/\//)
     end
-  
+
     def path
       return @location if is_local?
       @path ||= local_clone
     end
-  
+
     def name
       @name ||= @location.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
     end
-  
+
     def grit
       @grit ||= Grit::Repo.new(path)
     end
-  
+
     def commits
       grit.commits
     end
-  
+
     def local_clone
       path = File.join(TMP_PATH, "#{name}.git")
       %x(git clone --bare #{@location} #{path})
@@ -51,16 +51,16 @@ module GitIcs
     end
 
   end
-  
+
   class Cal
     def initialize(locations)
       @repos = locations.map { |location| Repo.new(location) }
     end
-    
+
     def cleanup
       %x(rm -rf #{TMP_PATH})
     end
-  
+
     def commits
       commits = []
       @repos.map do |repo|
@@ -106,13 +106,11 @@ end
 
 if __FILE__ == $0
 
-  def usage
-    "Usage: #{$0} path [path...]\n" + \
-    "       #{$0} uri [uri...]\n" + \
-    "       #{$0} --github-user=username"
+  if ARGV.empty?
+    abort "Usage: #{$0} path [path...]\n" + \
+          "       #{$0} uri [uri...]\n" + \
+          "       #{$0} --github-user=username"
   end
-
-  abort usage if ARGV.empty?
 
   paths = ARGV.map do |arg|
     if arg =~ /--github-user=(.*)/
