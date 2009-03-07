@@ -2,6 +2,7 @@
 # Makes an ical of commits out of a git repository.
 # Author:   Sunny Ripert http://sunfox.org
 # Licence:  WTFPl http://sam.zoy.org/wtfpl/
+# Version:  0.2
 # Requires: $ sudo gem install icalendar grit mime-types
 # Usage:    $ ruby git-ics.rb git-directory-or-uri > calendar.ics
 #           $ ruby git-ics.rb --github-user=sunny > my-github-calendar.ics
@@ -12,87 +13,114 @@ require 'grit'
 require 'yaml'
 require 'open-uri'
 
-class GitIcs
-  def initialize(paths)
-    @paths = paths
+module GitIcs
+  TMP_PATH = "/tmp/git-ics"
+
+  class Repo
+    attr_reader :location
+
+    def initialize(location)
+      @location = location
+    end
+
+    def is_local?
+      !(@location =~ /\:\/\//)
+    end
+
+    def path
+      return @location if is_local?
+      @path ||= local_clone
+    end
+
+    def name
+      @name ||= @location.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
+    end
+
+    def grit
+      @grit ||= Grit::Repo.new(path)
+    end
+
+    def commits
+      grit.commits
+    end
+
+    def local_clone
+      path = File.join(TMP_PATH, "#{name}.git")
+      %x(git clone --bare #{@location} #{path})
+      # TODO raise Grit::InvalidGitRepositoryError.new(@location)
+      path
+    end
+
   end
 
-  def commits
-    commits = []
-    @paths.each do |path|
-      is_uri = path =~ /\:\/\//
+  class Cal
+    def initialize(locations)
+      @repos = locations.map { |location| Repo.new(location) }
+    end
 
-      begin
-        path = self.class.clone_from_uri(path) if is_uri
-        repo_name = File.basename(File.expand_path(path).gsub(/\/?\.git$/, ''))
-        grit = Grit::Repo.new(path)
-        grit_commits = grit.commits
-        commits += grit_commits.map { |commit| [repo_name, commit] }
-      rescue Grit::NoSuchPathError => e
-        $stderr.puts "#{$0}: No such path #{e.message}"
-      rescue Grit::InvalidGitRepositoryError => e
-        $stderr.puts "#{$0}: #{e.message} is not a git repository"
-      ensure
-        %x(rm -rf #{path}) if is_uri
+    def cleanup
+      %x(rm -rf #{TMP_PATH})
+    end
+
+    def commits
+      commits = []
+      @repos.map do |repo|
+        begin
+          commits += repo.commits.map { |commit| [repo.name, commit] }
+        rescue Grit::NoSuchPathError => e
+          $stderr.puts "#{$0}: No such path #{e.message}"
+        rescue Grit::InvalidGitRepositoryError => e
+          $stderr.puts "#{$0}: #{e.message} is not a git repository"
+        ensure
+          cleanup
+        end
       end
+      cleanup
+      commits.sort_by { |ary| ary[1].committed_date }
     end
 
-    commits.sort_by { |ary| ary[1].committed_date }
-  end
-
-  def to_ical
-    cal = Icalendar::Calendar.new
-    self.commits.each do |repo_name, commit|
-      datetime = DateTime.parse(commit.committed_date.to_s)
-      cal.event do
-        dtstamp     datetime
-        dtstart     datetime
-        dtend       datetime
-        summary     "#{repo_name}: commit by #{commit.author}"
-        description commit.message
-        uid         commit.id
+    def to_ical
+      cal = Icalendar::Calendar.new
+      self.commits.each do |repo_name, commit|
+        datetime = DateTime.parse(commit.committed_date.to_s)
+        cal.event do
+          dtstamp     datetime
+          dtstart     datetime
+          dtend       datetime
+          summary     "#{repo_name}: commit by #{commit.author}"
+          description commit.message
+          uid         commit.id
+          klass       "PUBLIC"
+        end
       end
+      cal.to_ical
     end
-    cal.to_ical
   end
 
-  def self.clone_from_uri(uri)
-    dirname = uri.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
-    path = "/tmp/git-ics/#{dirname}.git"
-    if File.directory?(path)
-      %x(cd #{path}; git fetch origin)
-    else
-      %x(git clone --bare #{uri} #{path})
-    end
-    path
-  end
-
-  def self.from_github(username)
+  def self.github_uris_for_user(username)
     yaml = YAML.load(open("http://github.com/api/v1/yaml/#{username}"))
-    paths = yaml["user"]["repositories"].map { |rep|
+   yaml["user"]["repositories"].map { |rep|
       "git://github.com/#{rep[:owner]}/#{rep[:name]}.git"
     }
-    GitIcs.new(paths)
   end
 end
 
 if __FILE__ == $0
 
-  def usage
-    "Usage: #{$0} path [path...]\n" + \
-    "       #{$0} uri [uri...]\n" + \
-    "       #{$0} --github-user=username"
+  if ARGV.empty?
+    abort "Usage: #{$0} path [path...]\n" + \
+          "       #{$0} uri [uri...]\n" + \
+          "       #{$0} --github-user=username"
   end
 
-  abort usage if ARGV.empty?
+  paths = ARGV.map do |arg|
+    if arg =~ /--github-user=(.*)/
+      GitIcs.github_uris_for_user($1)
+    else
+      arg
+    end
+  end.flatten
 
-  paths = ARGV
-  if ARGV.first =~ /--github-user=(.*)/
-    git_ics = GitIcs.from_github($1)
-  else
-    git_ics = GitIcs.new(paths)
-  end
-
-  puts git_ics.to_ical
+  puts GitIcs::Cal.new(paths).to_ical
 end
 
