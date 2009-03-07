@@ -19,13 +19,14 @@ class GitIcs
 
   def commits
     commits = []
-    @paths.map do |path|
+    @paths.each do |path|
       is_uri = path =~ /\:\/\//
 
       begin
         path = self.class.clone_from_uri(path) if is_uri
         repo_name = File.basename(File.expand_path(path).gsub(/\/?\.git$/, ''))
-        grit_commits = Grit::Repo.new(path).commits
+        grit = Grit::Repo.new(path)
+        grit_commits = grit.commits
         commits += grit_commits.map { |commit| [repo_name, commit] }
       rescue Grit::NoSuchPathError => e
         $stderr.puts "#{$0}: No such path #{e.message}"
@@ -35,6 +36,7 @@ class GitIcs
         %x(rm -rf #{path}) if is_uri
       end
     end
+
     commits.sort_by { |ary| ary[1].committed_date }
   end
 
@@ -49,7 +51,6 @@ class GitIcs
         summary     "#{repo_name}: commit by #{commit.author}"
         description commit.message
         uid         commit.id
-        klass       "PUBLIC"
       end
     end
     cal.to_ical
@@ -58,15 +59,20 @@ class GitIcs
   def self.clone_from_uri(uri)
     dirname = uri.gsub(/^.*:\/\/|\/?\.git\/?$/, '').gsub(/\//, '-')
     path = "/tmp/git-ics/#{dirname}.git"
-    %x(git clone --bare #{uri} #{path})
+    if File.directory?(path)
+      %x(cd #{path}; git fetch origin)
+    else
+      %x(git clone --bare #{uri} #{path})
+    end
     path
   end
 
-  def self.github_uris_for_user(username)
+  def self.from_github(username)
     yaml = YAML.load(open("http://github.com/api/v1/yaml/#{username}"))
-    yaml["user"]["repositories"].map { |rep|
+    paths = yaml["user"]["repositories"].map { |rep|
       "git://github.com/#{rep[:owner]}/#{rep[:name]}.git"
     }
+    GitIcs.new(paths)
   end
 end
 
@@ -82,9 +88,11 @@ if __FILE__ == $0
 
   paths = ARGV
   if ARGV.first =~ /--github-user=(.*)/
-    paths = GitIcs.github_uris_for_user($1)
+    git_ics = GitIcs.from_github($1)
+  else
+    git_ics = GitIcs.new(paths)
   end
 
-  puts GitIcs.new(paths).to_ical
+  puts git_ics.to_ical
 end
 
