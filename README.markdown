@@ -5,7 +5,7 @@ Makes an ical of commits out of git repositories.
 
 - Author: [Sunny Ripert](http://sunfox.org/)
 - Licence: [WTFPL](http://sam.zoy.org/wtfpl/)
-- Requires:
+- Requires gems `icalendar`, `grit`, `mime-types`:
 
         $ sudo gem install icalendar grit mime-types
 
